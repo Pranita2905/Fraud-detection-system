@@ -1,175 +1,218 @@
-import streamlit as nn
+from flask import Flask, render_template_string, request
 import pandas as pd
 import numpy as np
 import pickle
+import os
 
-# Set page configurations
-st.set_page_config(
-    page_title="Fraud Guard AI",
-    page_icon="🛡️",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+app = Flask(__name__)
 
-# Custom CSS for a highly attractive and modern look
-st.markdown("""
-    <style>
-    .main {
-        background-color: #f8f9fa;
-    }
-    .header-box {
-        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-        padding: 30px;
-        border-radius: 12px;
-        color: white;
-        text-align: center;
-        margin-bottom: 25px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-    }
-    .metric-card {
-        background-color: white;
-        padding: 20px;
-        border-radius: 10px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-        border-left: 5px solid #2a5298;
-    }
-    .fraud-alert {
-        background-color: #ffeef0;
-        border: 2px solid #ff4d4d;
-        color: #990000;
-        padding: 20px;
-        border-radius: 10px;
-        text-align: center;
-        font-size: 24px;
-        font-weight: bold;
-    }
-    .safe-alert {
-        background-color: #e6f9ed;
-        border: 2px solid #2ecc71;
-        color: #196634;
-        padding: 20px;
-        border-radius: 10px;
-        text-align: center;
-        font-size: 24px;
-        font-weight: bold;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# Load the trained KNN model safely
-@st.cache_resource
-def load_model():
-    with open('KNN_model.pkl', 'rb') as file:
+# Load the trained KNN model
+MODEL_PATH = 'KNN_model.pkl'
+if os.path.exists(MODEL_PATH):
+    with open(MODEL_PATH, 'rb') as file:
         model = pickle.load(file)
-    return model
+else:
+    model = None
 
-try:
-    model = load_model()
-except Exception as e:
-    st.error(f"Error loading model. Make sure 'KNN_model.pkl' is in the same directory. Details: {e}")
-    st.stop()
+# Single-file HTML template with modern UI styling using Bootstrap 5
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fraud Guard AI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f4f6f9; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .hero-banner {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 40px 20px;
+            border-radius: 0 0 25px 25px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        .card { border: none; border-radius: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        .form-label { font-weight: 600; color: #495057; font-size: 0.9rem; }
+        .form-control, .form-select { border-radius: 8px; padding: 10px; border: 1px solid #ced4da; }
+        .form-control:focus, .form-select:focus { box-shadow: 0 0 0 0.25rem rgba(42, 82, 152, 0.25); border-color: #2a5298; }
+        .btn-primary { background-color: #2a5298; border: none; padding: 12px; font-weight: 600; border-radius: 8px; transition: all 0.3s; }
+        .btn-primary:hover { background-color: #1e3c72; transform: translateY(-1px); }
+        .result-box { border-radius: 12px; padding: 25px; text-align: center; font-size: 1.25rem; font-weight: bold; margin-top: 20px; }
+        .result-safe { background-color: #d1e7dd; color: #0f5132; border: 2px solid #badbcc; }
+        .result-fraud { background-color: #f8d7da; color: #842029; border: 2px solid #f5c2c7; }
+    </style>
+</head>
+<body>
 
-# Header banner
-st.markdown("""
-    <div class="header-box">
-        <h1>🛡️ Fraud Guard AI</h1>
-        <p style="font-size: 1.2rem; opacity: 0.9;">Real-time Transaction Fraud Risk Assessment Engine</p>
+    <div class="hero-banner text-center">
+        <h1 class="display-5 fw-bold">🛡️ Fraud Guard AI</h1>
+        <p class="lead opacity-75">Real-time Transaction Fraud Risk Assessment Engine</p>
     </div>
-""", unsafe_allow_html=True)
 
-# Sidebar layout for user input features
-st.sidebar.header("📥 Transaction Features")
-st.sidebar.markdown("Provide details below to test fraud probability:")
+    <div class="container mb-5">
+        {% if model_error %}
+        <div class="alert alert-danger text-center" role="alert">
+            <strong>Error:</strong> {{ model_error }}
+        </div>
+        {% endif %}
 
-# Input fields grouped nicely in the sidebar
-transaction_amount = st.sidebar.number_input("Transaction Amount ($)", min_value=0.0, value=150.0, step=5.0)
-hour_of_day = st.sidebar.slider("Hour of Day (0-23)", 0, 23, 14)
-customer_age = st.sidebar.number_input("Customer Age", min_value=18, max_value=100, value=35)
-num_items = st.sidebar.slider("Number of Items Purchased", 1, 20, 2)
-prev_transactions = st.sidebar.number_input("Previous Transactions Count", min_value=0, value=5)
-distance_from_home = st.sidebar.number_input("Distance from Home (miles)", min_value=0.0, value=12.5, step=1.0)
-velocity_score = st.sidebar.slider("Velocity Score (frequency of transactions)", 0.0, 10.0, 1.2, step=0.1)
-
-st.sidebar.markdown("---")
-# Categorical / Binary inputs converted into numerical values matching your model's structure
-is_weekend = st.sidebar.selectbox("Is Weekend?", ["No", "Yes"])
-is_weekend_val = 1 if is_weekend == "Yes" else 0
-
-is_first_transaction = st.sidebar.selectbox("Is First Transaction?", ["No", "Yes"])
-is_first_transaction_val = 1 if is_first_transaction == "Yes" else 0
-
-# Adjust selection boundaries if your model expects explicit dummy/encoded integers
-device_type = st.sidebar.number_input("Device Type ID (encoded)", min_value=0, max_value=10, value=1)
-network_quality = st.sidebar.number_input("Network Quality Rating (encoded)", min_value=0, max_value=5, value=3)
-store_type = st.sidebar.number_input("Store Type ID (encoded)", min_value=0, max_value=10, value=2)
-
-
-# Main section layout
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    st.subheader("📊 Current Evaluation Overview")
-    
-    # Showcase metrics beautifully
-    m_col1, m_col2, m_col3 = st.columns(3)
-    with m_col1:
-        st.markdown(f"<div class='metric-card'><small>Amount</small><br><b>${transaction_amount:,.2f}</b></div>", unsafe_allow_html=True)
-    with m_col2:
-        st.markdown(f"<div class='metric-card'><small>Distance</small><br><b>{distance_from_home} miles</b></div>", unsafe_allow_html=True)
-    with m_col3:
-        st.markdown(f"<div class='metric-card'><small>Velocity Index</small><br><b>{velocity_score}</b></div>", unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    # Process Inputs into the exact feature order requested
-    input_data = pd.DataFrame([{
-        'transaction_amount': transaction_amount,
-        'hour_of_day': hour_of_day,
-        'is_weekend': is_weekend_val,
-        'num_items': num_items,
-        'customer_age': customer_age,
-        'prev_transactions': prev_transactions,
-        'distance_from_home': distance_from_home,
-        'device_type': device_type,
-        'network_quality': network_quality,
-        'is_first_transaction': is_first_transaction_val,
-        'store_type': store_type,
-        'velocity_score': velocity_score
-    }])
-    
-    st.markdown("##### Input Payload Sent to KNN Model")
-    st.dataframe(input_data, use_container_width=True)
-
-with col2:
-    st.subheader("🔍 Prediction Results")
-    st.write("Click 'Analyze Transaction' to prompt the evaluation model.")
-    
-    if st.button("🚀 Analyze Transaction", use_container_width=True):
-        # Predict class
-        prediction = model.predict(input_data)[0]
-        
-        # Check if the model supports prediction probability
-        has_proba = hasattr(model, "predict_proba")
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        if prediction == 1:
-            st.markdown("""
-                <div class="fraud-alert">
-                    🚨 HIGH RISK DETECTED<br>
-                    <span style="font-size: 14px; font-weight: normal;">This transaction aligns heavily with known fraudulent patterns.</span>
+        <div class="row g-4">
+            <div class="col-lg-8">
+                <div class="card p-4">
+                    <h4 class="mb-4 text-primary">📥 Transaction Details</h4>
+                    <form method="POST" action="/">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Transaction Amount ($)</label>
+                                <input type="number" step="0.01" class="form-control" name="transaction_amount" value="{{ inputs.transaction_amount or 150.0 }}" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Hour of Day (0-23)</label>
+                                <input type="number" min="0" max="23" class="form-control" name="hour_of_day" value="{{ inputs.hour_of_day or 14 }}" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Is Weekend?</label>
+                                <select class="form-select" name="is_weekend">
+                                    <option value="0" {% if inputs.is_weekend == '0' %}selected{% endif %}>No</option>
+                                    <option value="1" {% if inputs.is_weekend == '1' %}selected{% endif %}>Yes</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Number of Items</label>
+                                <input type="number" min="1" class="form-control" name="num_items" value="{{ inputs.num_items or 2 }}" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Customer Age</label>
+                                <input type="number" min="18" class="form-control" name="customer_age" value="{{ inputs.customer_age or 35 }}" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Previous Transactions Count</label>
+                                <input type="number" min="0" class="form-control" name="prev_transactions" value="{{ inputs.prev_transactions or 5 }}" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Distance from Home (miles)</label>
+                                <input type="number" step="0.1" class="form-control" name="distance_from_home" value="{{ inputs.distance_from_home or 12.5 }}" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Device Type (ID Encoded)</label>
+                                <input type="number" class="form-control" name="device_type" value="{{ inputs.device_type or 1 }}" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Network Quality Index</label>
+                                <input type="number" class="form-control" name="network_quality" value="{{ inputs.network_quality or 3 }}" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Is First Transaction?</label>
+                                <select class="form-select" name="is_first_transaction">
+                                    <option value="0" {% if inputs.is_first_transaction == '0' %}selected{% endif %}>No</option>
+                                    <option value="1" {% if inputs.is_first_transaction == '1' %}selected{% endif %}>Yes</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Store Type (ID Encoded)</label>
+                                <input type="number" class="form-control" name="store_type" value="{{ inputs.store_type or 2 }}" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Velocity Score</label>
+                                <input type="number" step="0.1" class="form-control" name="velocity_score" value="{{ inputs.velocity_score or 1.2 }}" required>
+                            </div>
+                        </div>
+                        <div class="mt-4">
+                            <button type="submit" class="btn btn-primary w-100">🚀 Analyze Transaction</button>
+                        </div>
+                    </form>
                 </div>
-            """, unsafe_allow_html=True)
-            if has_proba:
-                prob = model.predict_proba(input_data)[0][1] * 100
-                st.error(f"Model Confidence: **{prob:.2f}% Probability of Fraud**")
-        else:
-            st.markdown("""
-                <div class="safe-alert">
-                    ✅ TRANSACTION APPROVED<br>
-                    <span style="font-size: 14px; font-weight: normal;">Low risk assessment. Safe to proceed.</span>
+            </div>
+
+            <div class="col-lg-4">
+                <div class="card p-4 h-100 d-flex flex-column justify-content-start">
+                    <h4 class="mb-4 text-primary">🔍 Evaluation Result</h4>
+                    
+                    {% if prediction is not none %}
+                        {% if prediction == 1 %}
+                            <div class="result-box result-fraud">
+                                🚨 HIGH RISK DETECTED
+                                <div class="fs-6 fw-normal mt-2">This transaction aligns closely with signature fraudulent patterns.</div>
+                            </div>
+                        {% else %}
+                            <div class="result-box result-safe">
+                                ✅ TRANSACTION APPROVED
+                                <div class="fs-6 fw-normal mt-2">Low risk evaluation. Safe to proceed with settlement.</div>
+                            </div>
+                        {% endif %}
+
+                        {% if probability is not none %}
+                            <div class="mt-4 text-center">
+                                <p class="text-muted mb-1">Model Confidence Probability</p>
+                                <h3 class="fw-bold text-dark">{{ "%.2f"|format(probability) }}%</h3>
+                            </div>
+                        {% endif %}
+                    {% else %}
+                        <div class="text-center text-muted my-auto py-5">
+                            <p class="mb-0">Fill out the form details and hit <strong>Analyze Transaction</strong> to trigger the detection model.</p>
+                        </div>
+                    {% endif %}
                 </div>
-            """, unsafe_allow_html=True)
-            if has_proba:
-                prob = model.predict_proba(input_data)[0][0] * 100
-                st.success(f"Model Confidence: **{prob:.2f}% Probability of Legitimacy**")
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
+"""
+
+@app.route('/', methods=['GET', 'POST'])
+def home():
+    prediction = None
+    probability = None
+    model_error = None
+    inputs = {}
+
+    if model is None:
+        model_error = "KNN_model.pkl not found in root directory. Please upload your model artifact."
+
+    if request.method == 'POST':
+        # Safely grab inputs from the user form submission
+        inputs = {
+            'transaction_amount': float(request.form.get('transaction_amount', 0)),
+            'hour_of_day': int(request.form.get('hour_of_day', 0)),
+            'is_weekend': int(request.form.get('is_weekend', 0)),
+            'num_items': int(request.form.get('num_items', 0)),
+            'customer_age': int(request.form.get('customer_age', 0)),
+            'prev_transactions': int(request.form.get('prev_transactions', 0)),
+            'distance_from_home': float(request.form.get('distance_from_home', 0)),
+            'device_type': int(request.form.get('device_type', 0)),
+            'network_quality': int(request.form.get('network_quality', 0)),
+            'is_first_transaction': int(request.form.get('is_first_transaction', 0)),
+            'store_type': int(request.form.get('store_type', 0)),
+            'velocity_score': float(request.form.get('velocity_score', 0))
+        }
+
+        if model is not None:
+            try:
+                # Structure features exactly matching the trained model pipeline
+                input_df = pd.DataFrame([inputs])
+                
+                # Fetch base prediction class
+                prediction = int(model.predict(input_df)[0])
+                
+                # Try fetching structural probabilities if the KNN supports it
+                if hasattr(model, "predict_proba"):
+                    prob_array = model.predict_proba(input_df)[0]
+                    # Show target confidence depending on output target value
+                    probability = float(prob_array[1] if prediction == 1 else prob_array[0]) * 100
+            except Exception as e:
+                model_error = f"Prediction failed structure match: {str(e)}"
+
+    return render_template_string(
+        HTML_TEMPLATE, 
+        prediction=prediction, 
+        probability=probability, 
+        model_error=model_error, 
+        inputs=inputs
+    )
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
